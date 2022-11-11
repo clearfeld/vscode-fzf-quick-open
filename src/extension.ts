@@ -12,12 +12,16 @@ let fzfTerminalPwd: vscode.Terminal | undefined = undefined;
 
 let findCmd: string;
 let fzfCmd: string;
+let fzfSearchCmd: string;
 let initialCwd: string;
 let rgFlags: string;
 let fzfPipe: string | undefined;
 let fzfPipeScript: string;
 let windowsNeedsEscape = false;
 let fzfQuote = "'";
+
+const gitTopLevelDirectoryCmd_Win32 = "for /f %a in ('git rev-parse --show-toplevel') do cd %a";
+const gitTopLevelDirectoryCmd_Unix = "cd $(git rev-parse --show-toplevel)";
 
 export const TERMINAL_NAME = "fzf terminal";
 export const TERMINAL_NAME_PWD = "fzf pwd terminal";
@@ -64,6 +68,7 @@ function moveToPwd(term: vscode.Terminal) {
 function applyConfig() {
 	let cfg = vscode.workspace.getConfiguration('fzf-quick-open');
 	fzfCmd = cfg.get('fuzzyCmd') as string ?? "fzf";
+	fzfSearchCmd = cfg.get('fuzzySearchCmd') as string ?? "fzf";
 	findCmd = cfg.get('findDirectoriesCmd') as string;
 	initialCwd = cfg.get('initialWorkingDirectory') as string;
 	let rgopt = cfg.get('ripgrepSearchStyle') as string;
@@ -114,6 +119,10 @@ function escapeWinPath(origPath: string) {
 
 function getFzfCmd() {
 	return fzfCmd;
+}
+
+function getFzfFuzzyCmd() {
+	return fzfSearchCmd;
 }
 
 function getCodeOpenFileCmd() {
@@ -256,6 +265,16 @@ export function activate(context: vscode.ExtensionContext) {
 		term.sendText(getCodeOpenFileCmd(), true);
 	}));
 
+	context.subscriptions.push(vscode.commands.registerCommand('fzf-quick-open.runFzfFileProjectRoot', () => {
+		let term = showFzfTerminal(TERMINAL_NAME, fzfTerminal);
+		moveToPwd(term);
+		if (isWindows()) {
+			term.sendText(`${gitTopLevelDirectoryCmd_Win32} && ${getCodeOpenFileCmd()}`, true);
+		} else {
+			term.sendText(`${gitTopLevelDirectoryCmd_Unix} && ${getCodeOpenFileCmd()}`, true);
+		}
+	}));
+
 	context.subscriptions.push(vscode.commands.registerCommand('fzf-quick-open.runFzfAddWorkspaceFolder', () => {
 		let term = showFzfTerminal(TERMINAL_NAME, fzfTerminal);
 		term.sendText(`${getFindCmd()} | ${getCodeOpenFolderCmd()}`, true);
@@ -284,6 +303,20 @@ export function activate(context: vscode.ExtensionContext) {
 		let term = showFzfTerminal(TERMINAL_NAME_PWD, fzfTerminalPwd);
 		moveToPwd(term);
 		term.sendText(makeSearchCmd(pattern), true);
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('fzf-quick-open.runFzfSearchProjectRoot', async () => {
+		let pattern = await getSearchText();
+		if (pattern === undefined) {
+			return;
+		}
+		let term = showFzfTerminal(TERMINAL_NAME_PWD, fzfTerminalPwd);
+		moveToPwd(term);
+		if (isWindows()) {
+			term.sendText(`${gitTopLevelDirectoryCmd_Win32} && ${makeSearchCmd(pattern)}`, true);
+		} else {
+			term.sendText(`${gitTopLevelDirectoryCmd_Unix} && ${makeSearchCmd(pattern)}`, true);
+		}
 	}));
 
 	vscode.window.onDidCloseTerminal((terminal) => {
@@ -334,5 +367,5 @@ export function deactivate() {
  */
 export function makeSearchCmd(pattern: string): string {
 	let q = getQuote();
-	return `rg ${q}${pattern}${q} ${rgFlags} --vimgrep --color ansi | ${getFzfCmd()} --ansi | ${getFzfPipeScript()} rg "${getFzfPipe()}"`;
+	return `rg ${q}${pattern}${q} ${rgFlags} --vimgrep --color ansi | ${getFzfFuzzyCmd()} | ${getFzfPipeScript()} rg "${getFzfPipe()}"`;
 }
